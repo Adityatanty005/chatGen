@@ -8,8 +8,8 @@ backend/dist/
 
 # Env
 *.env
-backend/.env
-frontend/.env
+.env.local
+.env.*.local
 
 # Logs
 logs/
@@ -33,3 +33,7 @@ lerna-debug.log*
 # Vite local files
 frontend/dist-ssr/
 *.local
+
+# Hosting platforms
+.vercel/
+.netlify/
