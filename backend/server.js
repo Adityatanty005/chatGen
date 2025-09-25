@@ -17,9 +17,17 @@ const AUTH_OPTIONAL = (process.env.AUTH_OPTIONAL === 'true') || (!process.env.FI
 const app = express();
 const server = http.createServer(app);
 
+// Resolve allowed origins for CORS/Socket.IO from env (comma-separated)
+const DEFAULT_ORIGINS = ["http://localhost:5173", "http://localhost:5174"];
+const ENV_ORIGINS = (process.env.CORS_ORIGINS || "")
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
+const ALLOWED_ORIGINS = ENV_ORIGINS.length > 0 ? ENV_ORIGINS : DEFAULT_ORIGINS;
+
 const io = socketIo(server, {
   cors: {
-    origin: ["http://localhost:5173", "http://localhost:5174"],
+    origin: ALLOWED_ORIGINS,
     methods: ["GET", "POST"]
   }
 });
@@ -49,7 +57,7 @@ app.post('/api/users/seed', async (req, res) => {
 connectDB();
 
 // Middleware
-app.use(cors({ origin: ["http://localhost:5173", "http://localhost:5174"], credentials: false }));
+app.use(cors({ origin: ALLOWED_ORIGINS, credentials: false }));
 app.use(express.json());
 
 // Auth middleware for REST routes using Firebase ID token from Authorization: Bearer <token>

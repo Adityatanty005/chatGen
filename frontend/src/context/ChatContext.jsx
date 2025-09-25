@@ -5,6 +5,9 @@ import io from "socket.io-client";
 const ChatContext = createContext();
 
 export const ChatProvider = ({ children }) => {
+  const API_BASE_URL = import.meta.env.VITE_API_URL;
+  const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || API_BASE_URL;
+
   const [messages, setMessages] = useState([]);
   const [socket, setSocket] = useState(null);
   const [connectedUsers, setConnectedUsers] = useState([]);
@@ -41,7 +44,11 @@ export const ChatProvider = ({ children }) => {
     const loadMessages = async () => {
       try {
         if (!authToken) return; // wait for token
-        const response = await fetch("http://localhost:3001/api/messages", {
+        if (!API_BASE_URL) {
+          console.error("VITE_API_URL is not set. Please configure your environment variables.");
+          return;
+        }
+        const response = await fetch(`${API_BASE_URL}/api/messages`, {
           headers: { Authorization: `Bearer ${authToken}` }
         });
         if (response.ok) {
@@ -66,7 +73,11 @@ export const ChatProvider = ({ children }) => {
   useEffect(() => {
     if (user && authToken) {
       // Connect to Socket.IO server with token auth and basic identity hints
-      const newSocket = io("http://localhost:3001", {
+      if (!SOCKET_URL) {
+        console.error("VITE_SOCKET_URL or VITE_API_URL is not set. Please configure your environment variables.");
+        return () => {};
+      }
+      const newSocket = io(SOCKET_URL, {
         auth: {
           token: authToken,
           email: user.email,
