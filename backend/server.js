@@ -161,7 +161,6 @@ io.on('connection', (socket) => {
           {
             $setOnInsert: {
               email: authedUser.email,
-              displayName: authedUser.displayName || (authedUser.email && authedUser.email.split('@')[0]) || 'User',
               provider: authedUser.provider || 'firebase'
             },
             $set: {
@@ -172,7 +171,7 @@ io.on('connection', (socket) => {
               avatarUrl: authedUser.avatarUrl
             }
           },
-          { upsert: true, new: true }
+          { upsert: true, new: true, runValidators: true }
         );
       } catch (e) {
         console.error('Upsert user failed:', e);

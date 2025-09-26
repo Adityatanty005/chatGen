@@ -83,7 +83,14 @@ export const ChatProvider = ({ children }) => {
         avatarUrl: user.photoURL || undefined
       };
       if (authToken) authPayload.token = authToken;
-      const newSocket = io(SOCKET_URL, { auth: authPayload });
+      const newSocket = io(SOCKET_URL, {
+        auth: authPayload,
+        transports: ['websocket', 'polling'],
+        withCredentials: false,
+        reconnection: true,
+        reconnectionAttempts: 5,
+        reconnectionDelay: 1000
+      });
       setSocket(newSocket);
 
       newSocket.on("connect", () => setConnected(true));
