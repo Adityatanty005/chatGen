@@ -1,8 +1,10 @@
 const mongoose = require("mongoose");
 
 async function tryConnect(uri) {
-  // Enable detailed query logging for debugging
-  mongoose.set('debug', true);
+  // Enable detailed query logging only when explicitly enabled
+  if (process.env.MONGOOSE_DEBUG === 'true') {
+    mongoose.set('debug', true);
+  }
   const conn = await mongoose.connect(uri);
   const { name, host } = conn.connection;
   console.log(`MongoDB connected -> db: ${name}, host: ${host}`);

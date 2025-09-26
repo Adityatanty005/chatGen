@@ -5,7 +5,9 @@ import io from "socket.io-client";
 const ChatContext = createContext();
 
 export const ChatProvider = ({ children }) => {
-  const API_BASE_URL = import.meta.env.VITE_API_URL;
+  // Prefer explicit API/Socket URLs; fall back to VITE_APP_URL for backward compat, then current origin
+  const EXPLICIT_API = import.meta.env.VITE_API_URL || import.meta.env.VITE_APP_URL;
+  const API_BASE_URL = EXPLICIT_API || (typeof window !== 'undefined' ? window.location.origin : '');
   const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || API_BASE_URL;
 
   const [messages, setMessages] = useState([]);
@@ -39,18 +41,16 @@ export const ChatProvider = ({ children }) => {
     };
   }, [user]);
 
-  // Load existing messages from database once token is ready
+  // Load existing messages from database once token or base URL is ready
   useEffect(() => {
     const loadMessages = async () => {
       try {
-        if (!authToken) return; // wait for token
         if (!API_BASE_URL) {
           console.error("VITE_API_URL is not set. Please configure your environment variables.");
           return;
         }
-        const response = await fetch(`${API_BASE_URL}/api/messages`, {
-          headers: { Authorization: `Bearer ${authToken}` }
-        });
+        const headers = authToken ? { Authorization: `Bearer ${authToken}` } : {};
+        const response = await fetch(`${API_BASE_URL}/api/messages`, { headers });
         if (response.ok) {
           const data = await response.json();
           setMessages(
@@ -68,27 +68,32 @@ export const ChatProvider = ({ children }) => {
     };
 
     loadMessages();
-  }, [authToken]);
+  }, [authToken, API_BASE_URL]);
 
   useEffect(() => {
-    if (user && authToken) {
+    if (user) {
       // Connect to Socket.IO server with token auth and basic identity hints
       if (!SOCKET_URL) {
         console.error("VITE_SOCKET_URL or VITE_API_URL is not set. Please configure your environment variables.");
         return () => {};
       }
-      const newSocket = io(SOCKET_URL, {
-        auth: {
-          token: authToken,
-          email: user.email,
-          displayName: user.displayName || (user.email && user.email.split("@")[0]) || "User",
-          avatarUrl: user.photoURL || undefined
-        }
-      });
+      const authPayload = {
+        email: user.email,
+        displayName: user.displayName || (user.email && user.email.split("@")[0]) || "User",
+        avatarUrl: user.photoURL || undefined
+      };
+      if (authToken) authPayload.token = authToken;
+      const newSocket = io(SOCKET_URL, { auth: authPayload });
       setSocket(newSocket);
 
       newSocket.on("connect", () => setConnected(true));
-      newSocket.on("disconnect", () => setConnected(false));
+      newSocket.on("disconnect", (reason) => {
+        console.warn("Socket disconnected:", reason);
+        setConnected(false);
+      });
+      newSocket.on("connect_error", (err) => {
+        console.error("Socket connect_error:", err && (err.message || err));
+      });
 
       // Join the chat room (server will prefer token identity)
       newSocket.emit("join", { email: user.email, displayName: user.displayName, avatarUrl: user.photoURL });
@@ -145,7 +150,7 @@ export const ChatProvider = ({ children }) => {
         newSocket.close();
       };
     }
-  }, [user, authToken]);
+  }, [user, authToken, SOCKET_URL]);
 
   const sendMessage = (messageData) => {
     if (socket && messageData.text.trim()) {

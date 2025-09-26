@@ -13,6 +13,7 @@ const { verifyIdToken } = require('./config/firebaseAdmin');
 
 // Determine if auth should be optional (dev-friendly default when Admin SDK isn't configured)
 const AUTH_OPTIONAL = (process.env.AUTH_OPTIONAL === 'true') || (!process.env.FIREBASE_SERVICE_ACCOUNT && !process.env.GOOGLE_APPLICATION_CREDENTIALS);
+const DEBUG_ROUTES = process.env.DEBUG_ROUTES === 'true';
 
 const app = express();
 const server = http.createServer(app);
@@ -24,41 +25,50 @@ const ENV_ORIGINS = (process.env.CORS_ORIGINS || "")
   .map((s) => s.trim())
   .filter(Boolean);
 const ALLOWED_ORIGINS = ENV_ORIGINS.length > 0 ? ENV_ORIGINS : DEFAULT_ORIGINS;
+const allowAll = ALLOWED_ORIGINS.length === 1 && ALLOWED_ORIGINS[0] === "*";
 
 const io = socketIo(server, {
   cors: {
-    origin: ALLOWED_ORIGINS,
+    origin: allowAll ? true : ALLOWED_ORIGINS,
     methods: ["GET", "POST"]
   }
 });
 
-// Count users (debug)
-app.get('/api/users/count', async (req, res) => {
-  try {
-    const count = await User.countDocuments();
-    res.json({ count });
-  } catch (e) {
-    res.status(500).json({ error: 'Failed to count users' });
-  }
-});
+// Debug routes are exposed only when explicitly enabled
+if (DEBUG_ROUTES) {
+  // Count users (debug)
+  app.get('/api/users/count', async (req, res) => {
+    try {
+      const count = await User.countDocuments();
+      res.json({ count });
+    } catch (e) {
+      res.status(500).json({ error: 'Failed to count users' });
+    }
+  });
 
-// Seed a user (debug) - creates a unique email based on timestamp
-app.post('/api/users/seed', async (req, res) => {
-  try {
-    const email = `seed_${Date.now()}@example.com`;
-    const user = await User.create({ email, displayName: 'Seed User' });
-    res.status(201).json(user);
-  } catch (e) {
-    res.status(500).json({ error: 'Failed to seed user' });
-  }
-});
+  // Seed a user (debug) - creates a unique email based on timestamp
+  app.post('/api/users/seed', async (req, res) => {
+    try {
+      const email = `seed_${Date.now()}@example.com`;
+      const user = await User.create({ email, displayName: 'Seed User' });
+      res.status(201).json(user);
+    } catch (e) {
+      res.status(500).json({ error: 'Failed to seed user' });
+    }
+  });
+}
 
 // Connect to MongoDB
 connectDB();
 
 // Middleware
-app.use(cors({ origin: ALLOWED_ORIGINS, credentials: false }));
+app.use(cors({ origin: allowAll ? true : ALLOWED_ORIGINS, credentials: false }));
 app.use(express.json());
+
+// Warn if running in production with optional auth
+if (process.env.NODE_ENV === 'production' && AUTH_OPTIONAL) {
+  console.warn('WARNING: AUTH_OPTIONAL is enabled in production. Routes and sockets accept unauthenticated traffic.');
+}
 
 // Auth middleware for REST routes using Firebase ID token from Authorization: Bearer <token>
 async function requireAuth(req, res, next) {
@@ -193,8 +203,15 @@ io.on('connection', (socket) => {
     if (!user) return;
 
     try {
+      const text = (messageData && typeof messageData.text === 'string') ? messageData.text.trim() : '';
+      if (!text) {
+        return socket.emit('sendMessageError', { error: 'Message text is required' });
+      }
+      if (text.length > 2000) {
+        return socket.emit('sendMessageError', { error: 'Message too long' });
+      }
       const newMessage = new Message({
-        text: messageData.text,
+        text,
         sender: user.email,
         type: 'message'
       });
@@ -211,7 +228,7 @@ io.on('connection', (socket) => {
       io.emit('newMessage', message);
     } catch (error) {
       console.error('Error saving message:', error);
-      socket.emit('error', 'Failed to send message');
+      socket.emit('sendMessageError', { error: 'Failed to send message' });
     }
   });
 
@@ -322,10 +339,13 @@ app.get('/health', (req, res) => {
 app.get('/health/db', async (req, res) => {
   try {
     const connection = mongoose.connection;
+    if (!connection || connection.readyState !== 1 || !connection.db) {
+      return res.status(503).json({ error: 'Database not connected' });
+    }
     const collections = await connection.db.listCollections().toArray();
     res.json({
       dbName: connection.name,
-      host: connection.host,
+      host: (connection && connection.host) || undefined,
       collections: collections.map(c => c.name)
     });
   } catch (e) {
@@ -336,4 +356,17 @@ app.get('/health/db', async (req, res) => {
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
+});
+
+// 404 handler
+app.use((req, res) => {
+  res.status(404).json({ error: 'Not found' });
+});
+
+// Centralized error handler
+// eslint-disable-next-line no-unused-vars
+app.use((err, req, res, next) => {
+  console.error('Unhandled error:', err);
+  const status = err.status || 500;
+  res.status(status).json({ error: status === 500 ? 'Internal server error' : err.message });
 });
